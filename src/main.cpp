@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <windows.h>
+#include <conio.h>
 #include "steam/steam_api.h"
 
 void SetSteamAppId(const std::string& appId) {
@@ -81,7 +82,6 @@ int main(int argc, char* argv[]) {
     }
 
     // ownership check
-    std::vector<PROCESS_INFORMATION> children;
     char selfPath[MAX_PATH];
     GetModuleFileNameA(NULL, selfPath, MAX_PATH);
 
@@ -91,43 +91,59 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int count = 0;
-    for (int appId : gameIds) {
-        if (pApps->BIsSubscribedApp(appId)) {
-            std::cout << "Verified ownership of AppID " << appId << ". Launching idler..." << std::endl;
+    while (true) {
+        std::vector<PROCESS_INFORMATION> children;
+        int count = 0;
+        for (int appId : gameIds) {
+            if (pApps->BIsSubscribedApp(appId)) {
+                std::cout << "Verified ownership of AppID " << appId << ". Launching idler..." << std::endl;
 
-            std::string cmdLine = "\"" + std::string(selfPath) + "\" --child " + std::to_string(appId);
-            
-            STARTUPINFOA si;
-            PROCESS_INFORMATION pi;
-            ZeroMemory(&si, sizeof(si));
-            si.cb = sizeof(si);
-            ZeroMemory(&pi, sizeof(pi));
+                std::string cmdLine = "\"" + std::string(selfPath) + "\" --child " + std::to_string(appId);
+                
+                STARTUPINFOA si;
+                PROCESS_INFORMATION pi;
+                ZeroMemory(&si, sizeof(si));
+                si.cb = sizeof(si);
+                ZeroMemory(&pi, sizeof(pi));
 
-            if (CreateProcessA(NULL, const_cast<char*>(cmdLine.c_str()), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-                children.push_back(pi);
-                count++;
+                if (CreateProcessA(NULL, const_cast<char*>(cmdLine.c_str()), NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+                    children.push_back(pi);
+                    count++;
+                } else {
+                    std::cerr << "Failed to launch child process for " << appId << std::endl;
+                }
             } else {
-                std::cerr << "Failed to launch child process for " << appId << std::endl;
+                std::cout << "Skipping AppID " << appId << " (Not owned)" << std::endl;
             }
-        } else {
-            std::cout << "Skipping AppID " << appId << " (Not owned)" << std::endl;
         }
-    }
 
-    if (count == 0) {
-        std::cout << "No valid games to idle." << std::endl;
-    } else {
-        std::cout << "\nIdling " << count << " games." << std::endl;
-        std::cout << "DO NOT CLOSE THIS WINDOW. Press Enter to stop all idlers and exit." << std::endl;
-        std::cin.get();
-    }
+        if (count == 0) {
+            std::cout << "No valid games to idle." << std::endl;
+            break;
+        } else {
+            std::cout << "\nIdling " << count << " games." << std::endl;
+            std::cout << "Restarting in 3 hours. Press any key to stop all idlers and exit." << std::endl;
+            
+            bool stop = false;
+            // 3 hours = 10800 seconds
+            for (int i = 0; i < 10800; ++i) {
+                if (_kbhit()) {
+                    stop = true;
+                    _getch(); // consume the key
+                    break;
+                }
+                Sleep(1000);
+            }
 
-    std::cout << "Stopping idlers..." << std::endl;
-    for (const auto& pi : children) {
-        TerminateProcess(pi.hProcess, 0);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+            std::cout << (stop ? "Stopping idlers..." : "Restarting idlers...") << std::endl;
+            for (const auto& pi : children) {
+                TerminateProcess(pi.hProcess, 0);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+            }
+
+            if (stop) break;
+        }
     }
 
     SteamAPI_Shutdown();
